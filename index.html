@@ -123,8 +123,59 @@ let faceModel = null, poseModel = null;
   } catch (e) { console.warn('인식 모델 로딩 실패:', e); }
 })();
 
-function baseFilter() {
-  return `brightness(${sliders.bright.value}%) saturate(${sliders.sat.value}%)`;
+// 사파리(아이폰)는 ctx.filter 미지원 → 픽셀 연산 폴백 사용
+const FILTER_OK = (() => {
+  const t = document.createElement('canvas').getContext('2d');
+  t.filter = 'blur(1px)';
+  return t.filter === 'blur(1px)';
+})();
+
+// 블러 대체: 축소했다가 확대하면 부드럽게 번짐 (모든 브라우저 지원)
+function feather(src, px, dw, dh) {
+  const out = document.createElement('canvas');
+  out.width = dw; out.height = dh;
+  const oc = out.getContext('2d');
+  if (FILTER_OK) {
+    oc.filter = `blur(${px}px)`;
+    oc.drawImage(src, 0, 0, dw, dh);
+  } else {
+    const f = Math.max(2, px);
+    const t = document.createElement('canvas');
+    t.width = Math.max(1, Math.round(dw / f));
+    t.height = Math.max(1, Math.round(dh / f));
+    t.getContext('2d').drawImage(src, 0, 0, t.width, t.height);
+    oc.drawImage(t, 0, 0, dw, dh);
+  }
+  return out;
+}
+
+// 밝기·채도 픽셀 연산 (ctx.filter 폴백)
+function adjustBS(tctx, bPct, sPct) {
+  if (bPct === 100 && sPct === 100) return;
+  const b = bPct / 100, s = sPct / 100;
+  const w = tctx.canvas.width, h = tctx.canvas.height;
+  const img = tctx.getImageData(0, 0, w, h), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i] * b, g = d[i+1] * b, bl = d[i+2] * b;
+    const l = 0.299 * r + 0.587 * g + 0.114 * bl;
+    d[i] = l + (r - l) * s; d[i+1] = l + (g - l) * s; d[i+2] = l + (bl - l) * s;
+  }
+  tctx.putImageData(img, 0, 0);
+}
+
+// 밝기/채도/블러를 적용한 원본 사본 (브라우저 무관)
+function makeAdjusted(bPct, sPct, blurPx) {
+  const t = document.createElement('canvas');
+  t.width = work.width; t.height = work.height;
+  const tc = t.getContext('2d', { willReadFrequently: true });
+  if (FILTER_OK) {
+    tc.filter = `brightness(${bPct}%) saturate(${sPct}%)` + (blurPx ? ` blur(${blurPx}px)` : '');
+    tc.drawImage(stillSrc, 0, 0);
+  } else {
+    tc.drawImage(blurPx ? feather(stillSrc, blurPx, t.width, t.height) : stillSrc, 0, 0);
+    adjustBS(tc, bPct, sPct);
+  }
+  return t;
 }
 
 // ---- 피부 마스크: 얼굴 윤곽 채우고 눈·입 구멍 뚫기 ----
@@ -136,7 +187,6 @@ function buildSkinMask() {
   const w = stillSrc.width, h = stillSrc.height;
   const m = document.createElement('canvas'); m.width = w; m.height = h;
   const g = m.getContext('2d');
-  g.filter = `blur(${Math.max(4, w / 150)}px)`;       // 가장자리 페더링
   g.fillStyle = '#fff';
   for (const f of faces) {
     g.beginPath();
@@ -154,39 +204,31 @@ function buildSkinMask() {
       g.beginPath(); g.arc((ax+bx)/2, (ay+by)/2, r, 0, 7); g.fill();
     }
   }
-  return m;
+  return feather(m, Math.max(4, w / 150), w, h);      // 가장자리 페더링
 }
 
-// 필터 입힌 원본을 피부 마스크로 잘라 work 위에 겹침
-function maskedDraw(filter, alpha) {
-  const t = document.createElement('canvas');
-  t.width = work.width; t.height = work.height;
+// 보정본을 피부 마스크로 잘라 work 위에 겹침
+function overlayMasked(t, alpha) {
   const tc = t.getContext('2d');
-  tc.filter = filter;
-  tc.drawImage(stillSrc, 0, 0);
-  tc.filter = 'none';
   tc.globalCompositeOperation = 'destination-in';
   tc.drawImage(skinMask, 0, 0);
   wctx.save(); wctx.globalAlpha = alpha; wctx.drawImage(t, 0, 0); wctx.restore();
 }
 
 function drawWithFilters() {
-  wctx.save();
-  wctx.filter = baseFilter();
-  wctx.drawImage(stillSrc, 0, 0);
-  wctx.restore();
+  const b = +sliders.bright.value, sat = +sliders.sat.value;
   const s = +sliders.smooth.value, wk = +sliders.white.value;
   const blurPx = Math.max(3, work.width / 200);
+  wctx.drawImage(makeAdjusted(b, sat, 0), 0, 0);
   if (skinMask) {
     // 피부 영역만: 미백(밝기↑·채도 약간↓) → 피부결(블러 블렌드)
-    if (wk > 0) maskedDraw(`${baseFilter()} brightness(${100 + wk*0.25}%) saturate(${100 - wk*0.15}%)`, 1);
-    if (s > 0)  maskedDraw(`${baseFilter()} blur(${blurPx}px)`, s / 100 * 0.85);
+    if (wk > 0) overlayMasked(makeAdjusted(b + wk*0.25, sat - wk*0.15, 0), 1);
+    if (s > 0)  overlayMasked(makeAdjusted(b, sat, blurPx), s / 100 * 0.85);
   } else if (s > 0) {
     // 얼굴 인식 실패 시 폴백: 전체 소프트포커스
     wctx.save();
     wctx.globalAlpha = s / 100 * 0.75;
-    wctx.filter = baseFilter() + ` blur(${blurPx}px)`;
-    wctx.drawImage(stillSrc, 0, 0);
+    wctx.drawImage(makeAdjusted(b, sat, blurPx), 0, 0);
     wctx.restore();
   }
 }
@@ -487,11 +529,7 @@ document.getElementById('fileInput').onchange = async e => {
         mi.data[i*4+3] = raw[i] * 255;
       }
       mc.getContext('2d').putImageData(mi, 0, 0);
-      maskFull = document.createElement('canvas');
-      maskFull.width = c.width; maskFull.height = c.height;
-      const fx = maskFull.getContext('2d');
-      fx.filter = `blur(${Math.max(2, c.width / 400)}px)`;
-      fx.drawImage(mc, 0, 0, c.width, c.height);
+      maskFull = feather(mc, Math.max(2, c.width / 400), c.width, c.height);
       m.close();
     }
   }
