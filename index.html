@@ -72,7 +72,7 @@
   <div id="faceNote"></div>
   <input type="file" id="fileInput" accept="image/*">
 </div>
-<div style="color:#555; font-size:0.7rem; margin-top:6px">v9</div>
+<div style="color:#555; font-size:0.7rem; margin-top:6px">v10</div>
 
 <script type="module">
 import { FaceLandmarker, PoseLandmarker, FilesetResolver } from
@@ -114,12 +114,14 @@ const modelsReady = (async () => {
     faceModel = await FaceLandmarker.createFromOptions(fileset, {
       baseOptions: { modelAssetPath:
         "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" },
-      runningMode: "IMAGE", numFaces: 5
+      runningMode: "IMAGE", numFaces: 5,
+      minFaceDetectionConfidence: 0.3, minFacePresenceConfidence: 0.3
     });
     poseModel = await PoseLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task" },
-      runningMode: "IMAGE", numPoses: 1, outputSegmentationMasks: true
+      baseOptions: { modelAssetPath:   // full 모델: lite보다 인식률 높음 (로딩 1~2초 추가)
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task" },
+      runningMode: "IMAGE", numPoses: 1, outputSegmentationMasks: true,
+      minPoseDetectionConfidence: 0.3, minPosePresenceConfidence: 0.3
     });
   } catch (e) { console.warn('인식 모델 로딩 실패:', e); }
 })();
@@ -474,7 +476,7 @@ function render() {
   const ratioK = +sliders.ratio.value / 100;
   let bands = null;
   if ((legK > 0 || ratioK > 0) && pose) {
-    const vis = i => (pose[i].visibility ?? 1) > 0.6;
+    const vis = i => (pose[i].visibility ?? 1) > 0.5;
     const Y = i => pose[i].y * h;
     const neckY = vis(11) && vis(12) ? Math.round((Y(11) + Y(12)) / 2) : 0;
     const kneesOK = vis(25) && vis(26);                   // 무릎이 사진에 없으면 다리 늘리기 비활성
@@ -548,7 +550,7 @@ document.getElementById('fileInput').onchange = async e => {
   const parts = [];
   parts.push(faces.length ? `얼굴 ${faces.length}명 ✓` : '얼굴 인식 ✗');
   parts.push(pose ? '몸 ✓' : '몸 ✗');
-  if (pose && !([25, 26].every(i => (pose[i].visibility ?? 1) > 0.6)))
+  if (pose && !([25, 26].every(i => (pose[i].visibility ?? 1) > 0.5)))
     parts.push('다리 미검출 (다리 길이·굵기 비활성)');
   parts.push(maskFull ? '배경 보호 ON' : '배경 보호 OFF');
   note.textContent = parts.join(' · ') + ' — 인식된 부위의 슬라이더만 작동해요';
