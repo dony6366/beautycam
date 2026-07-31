@@ -105,8 +105,8 @@ let maskFull = null;        // 사람 영역 마스크 (배경 보호용)
 let skinMask = null;        // 피부 영역 마스크 (눈·입 제외)
 let faceModel = null, poseModel = null;
 
-// ---- MediaPipe 모델 로딩 (백그라운드) ----
-(async () => {
+// ---- MediaPipe 모델 로딩 (백그라운드, 사진 선택 시 완료 대기) ----
+const modelsReady = (async () => {
   try {
     const fileset = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
@@ -123,11 +123,17 @@ let faceModel = null, poseModel = null;
   } catch (e) { console.warn('인식 모델 로딩 실패:', e); }
 })();
 
+
 // 사파리(아이폰)는 ctx.filter 미지원 → 픽셀 연산 폴백 사용
+// 실제로 1픽셀을 그려서 필터가 적용되는지 검사 (속성 존재 여부만으론 오판)
 const FILTER_OK = (() => {
-  const t = document.createElement('canvas').getContext('2d');
-  t.filter = 'blur(1px)';
-  return t.filter === 'blur(1px)';
+  const c = document.createElement('canvas');
+  c.width = c.height = 1;
+  const t = c.getContext('2d');
+  t.filter = 'invert(100%)';
+  t.fillStyle = '#000';
+  t.fillRect(0, 0, 1, 1);
+  return t.getImageData(0, 0, 1, 1).data[0] > 200;   // 필터가 먹으면 검정→흰색
 })();
 
 // 블러 대체: 축소했다가 확대하면 부드럽게 번짐 (모든 브라우저 지원)
@@ -504,6 +510,8 @@ document.getElementById('loadBtn').onclick = () => document.getElementById('file
 document.getElementById('fileInput').onchange = async e => {
   const file = e.target.files[0];
   if (!file) return;
+  note.textContent = 'AI 인식 준비 중...';
+  await modelsReady;                                  // 모델 다운로드 전에 사진을 골라도 인식되도록 대기
   const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); // 폰 사진 EXIF 회전 반영
   const MAX = 1600;                                   // 워핑 속도 위해 크기 제한
   const scale = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
@@ -552,7 +560,9 @@ const AUTO_DEFAULTS = { bright:108, sat:108, smooth:45, white:25, eye:20, jaw:15
                         waist:12, hip:8, shoulder:8, arm:8, leg:10, thigh:8, calf:8, ratio:5 };
 document.getElementById('autoBtn').onclick = () => {
   if (!stillSrc) return;
-  const preset = JSON.parse(localStorage.getItem('bc_preset') || 'null') || AUTO_DEFAULTS;
+  let preset = null;
+  try { preset = JSON.parse(localStorage.getItem('bc_preset')); } catch {}
+  preset = preset || AUTO_DEFAULTS;
   for (const id of SLIDER_IDS) {
     if (preset[id] == null) continue;
     sliders[id].value = preset[id];
@@ -576,15 +586,21 @@ function showOriginal() {
   ctx.drawImage(stillSrc, 0, 0);
 }
 cmpBtn.addEventListener('pointerdown', showOriginal);
-cmpBtn.addEventListener('pointerup', () => stillSrc && render());
-cmpBtn.addEventListener('pointerleave', () => stillSrc && render());
+for (const ev of ['pointerup', 'pointerleave', 'pointercancel'])
+  cmpBtn.addEventListener(ev, () => stillSrc && render());
+cmpBtn.addEventListener('contextmenu', e => e.preventDefault());  // 폰 길게 누르기 메뉴 방지
+cmpBtn.style.userSelect = cmpBtn.style.webkitUserSelect = 'none';
+cmpBtn.style.touchAction = 'manipulation';
 
 // ---- 저장 ----
 document.getElementById('saveBtn').onclick = () => {
-  const a = document.createElement('a');
-  a.download = `beautycam_${Date.now()}.jpg`;
-  a.href = canvas.toDataURL('image/jpeg', 0.92);
-  a.click();
+  canvas.toBlob(b => {                                // Blob 방식: 아이폰 사파리 다운로드 호환
+    const a = document.createElement('a');
+    a.download = `beautycam_${Date.now()}.jpg`;
+    a.href = URL.createObjectURL(b);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }, 'image/jpeg', 0.92);
 };
 </script>
 </body>
