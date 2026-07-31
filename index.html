@@ -72,7 +72,7 @@
   <div id="faceNote"></div>
   <input type="file" id="fileInput" accept="image/*">
 </div>
-<div style="color:#555; font-size:0.7rem; margin-top:6px">v8</div>
+<div style="color:#555; font-size:0.7rem; margin-top:6px">v9</div>
 
 <script type="module">
 import { FaceLandmarker, PoseLandmarker, FilesetResolver } from
@@ -330,41 +330,41 @@ function collectWarps() {
           const [ax, ay] = P(s), [bx, by] = P(hp);
           for (const t of [0.5, 0.75]) {
             const wx2 = ax + (bx - ax) * t, wy2 = ay + (by - ay) * t;
-            passes.push(shift(wx2, wy2, bodyW * 0.45, Math.sign(cX - wx2) * K('waist') * bodyW * 0.10, 0));
+            passes.push(shift(wx2, wy2, bodyW * 0.5, Math.sign(cX - wx2) * K('waist') * bodyW * 0.17, 0));
           }
         }
       }
       if (K('hip') > 0 && vis(23) && vis(24)) {         // 골반 폭
         for (const i of [23, 24]) {
           const [px, py] = P(i);
-          passes.push(shift(px, py, bodyW * 0.4, Math.sign(cX - px) * K('hip') * bodyW * 0.10, 0));
+          passes.push(shift(px, py, bodyW * 0.45, Math.sign(cX - px) * K('hip') * bodyW * 0.16, 0));
         }
       }
       if (K('shoulder') > 0) {                          // 어깨 너비
         for (const i of [11, 12]) {
           const [px, py] = P(i);
-          passes.push(shift(px, py, bodyW * 0.35, Math.sign(cX - px) * K('shoulder') * bodyW * 0.09, 0));
+          passes.push(shift(px, py, bodyW * 0.4, Math.sign(cX - px) * K('shoulder') * bodyW * 0.15, 0));
         }
       }
       if (K('arm') > 0) {                               // 팔뚝 (어깨→팔꿈치 중간, 핀치로 가늘게)
         for (const [s, e] of [[11, 13], [12, 14]]) {
           if (!vis(e)) continue;
           const [ax, ay] = P(s), [bx, by] = P(e);
-          passes.push(bulge((ax+bx)/2, (ay+by)/2, Math.hypot(bx-ax, by-ay) * 0.6, -K('arm') * 0.2));
+          passes.push(bulge((ax+bx)/2, (ay+by)/2, Math.hypot(bx-ax, by-ay) * 0.6, -K('arm') * 0.35));
         }
       }
       if (K('thigh') > 0) {                             // 허벅지 (골반→무릎, 핀치)
         for (const [hp, kn] of [[23, 25], [24, 26]]) {
           if (!vis(hp) || !vis(kn)) continue;
           const [hx, hy] = P(hp), [kx, ky] = P(kn);
-          passes.push(bulge((hx+kx)/2, (hy+ky)/2, Math.hypot(kx-hx, ky-hy) * 0.6, -K('thigh') * 0.2));
+          passes.push(bulge((hx+kx)/2, (hy+ky)/2, Math.hypot(kx-hx, ky-hy) * 0.6, -K('thigh') * 0.35));
         }
       }
       if (K('calf') > 0) {                              // 종아리 (무릎→발목, 핀치)
         for (const [kn, an] of [[25, 27], [26, 28]]) {
           if (!vis(kn) || !vis(an)) continue;
           const [kx, ky] = P(kn), [ax, ay] = P(an);
-          passes.push(bulge((kx+ax)/2, (ky+ay)/2, Math.hypot(ax-kx, ay-ky) * 0.55, -K('calf') * 0.18));
+          passes.push(bulge((kx+ax)/2, (ky+ay)/2, Math.hypot(ax-kx, ay-ky) * 0.55, -K('calf') * 0.3));
         }
       }
     }
@@ -482,8 +482,8 @@ function render() {
     let ankleY = vis(27) && vis(28) ? Math.round((Y(27) + Y(28)) / 2) : h;
     kneeY = Math.max(kneeY, neckY);
     ankleY = Math.min(h, Math.max(ankleY, kneeY));
-    const bodyS = ratioK > 0 && neckY > 0 && vis(23) && vis(24) ? 1 + ratioK * 0.15 : 1;
-    const legS = legK > 0 && kneesOK ? 1 + legK * 0.32 : 1;
+    const bodyS = ratioK > 0 && neckY > 0 && vis(23) && vis(24) ? 1 + ratioK * 0.22 : 1;
+    const legS = legK > 0 && kneesOK ? 1 + legK * 0.45 : 1;
     if (bodyS > 1 || legS > 1) {
       bands = [[0, neckY, 1], [neckY, kneeY, bodyS],
                [kneeY, ankleY, bodyS * legS], [ankleY, h, 1]];
