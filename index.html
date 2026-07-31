@@ -72,7 +72,7 @@
   <div id="faceNote"></div>
   <input type="file" id="fileInput" accept="image/*">
 </div>
-<div style="color:#555; font-size:0.7rem; margin-top:6px">v10</div>
+<div style="color:#555; font-size:0.7rem; margin-top:6px">v11</div>
 
 <script type="module">
 import { FaceLandmarker, PoseLandmarker, FilesetResolver } from
@@ -233,13 +233,8 @@ function drawWithFilters() {
     // 피부 영역만: 미백(밝기↑·채도 약간↓) → 피부결(블러 블렌드)
     if (wk > 0) overlayMasked(makeAdjusted(b + wk*0.25, sat - wk*0.15, 0), 1);
     if (s > 0)  overlayMasked(makeAdjusted(b, sat, blurPx), s / 100 * 0.85);
-  } else if (s > 0) {
-    // 얼굴 인식 실패 시 폴백: 전체 소프트포커스
-    wctx.save();
-    wctx.globalAlpha = s / 100 * 0.75;
-    wctx.drawImage(makeAdjusted(b, sat, blurPx), 0, 0);
-    wctx.restore();
   }
+  // 얼굴 미인식 시 피부결·미백은 적용 안 함 (사진 전체가 뿌예지는 문제 방지)
 }
 
 // ---- 워핑 엔진 (얼굴·체형 공용) ----
@@ -543,6 +538,21 @@ document.getElementById('fileInput').onchange = async e => {
       mc.getContext('2d').putImageData(mi, 0, 0);
       maskFull = feather(mc, Math.max(2, c.width / 400), c.width, c.height);
       m.close();
+    }
+  }
+  // 얼굴을 못 찾았으면 몸이 알려준 머리 위치 주변을 잘라 재시도 (작거나 가려진 얼굴 인식률 개선)
+  if (!faces.length && faceModel && pose) {
+    const w = c.width, h = c.height;
+    const nose = pose[0], s1 = pose[11], s2 = pose[12];
+    const size = Math.abs(s1.x - s2.x) * w * 2.2;
+    if (size > 40) {
+      const x0 = Math.max(0, nose.x * w - size / 2), y0 = Math.max(0, nose.y * h - size / 2);
+      const cw = Math.min(size, w - x0), ch = Math.min(size, h - y0);
+      const crop = document.createElement('canvas');
+      crop.width = cw; crop.height = ch;
+      crop.getContext('2d').drawImage(c, x0, y0, cw, ch, 0, 0, cw, ch);
+      const found = faceModel.detect(crop).faceLandmarks || [];
+      faces = found.map(f => f.map(p => ({ x: (x0 + p.x * cw) / w, y: (y0 + p.y * ch) / h, z: p.z })));
     }
   }
   skinMask = buildSkinMask();
