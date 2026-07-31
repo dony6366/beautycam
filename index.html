@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>뷰티캠</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI', sans-serif; background:#1a1a2e; color:#eee; min-height:100vh;
+         display:flex; flex-direction:column; align-items:center; padding:12px; }
+  h1 { font-size:1.3rem; margin:4px 0 12px; color:#ff8fab; }
+  #stage { position:relative; max-width:640px; width:100%; }
+  canvas { width:100%; border-radius:16px; background:#000; display:block; min-height:200px; }
+  #msg { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+         color:#aaa; text-align:center; pointer-events:none; white-space:pre-line; }
+  #controls { max-width:640px; width:100%; margin-top:12px; background:#16213e;
+              border-radius:16px; padding:16px; }
+  .group { font-size:0.8rem; color:#ff8fab; margin:10px 0 6px; border-bottom:1px solid #0f3460;
+           padding-bottom:3px; }
+  .group:first-child { margin-top:0; }
+  .slider-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .slider-row label { width:64px; font-size:0.9rem; flex-shrink:0; }
+  .slider-row input { flex:1; accent-color:#ff8fab; }
+  .slider-row span { width:36px; text-align:right; font-size:0.85rem; color:#ff8fab; }
+  #buttons { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  button { flex:1; min-width:90px; padding:12px; border:none; border-radius:12px;
+           background:#ff8fab; color:#1a1a2e; font-size:0.95rem; font-weight:bold; cursor:pointer; }
+  button.secondary { background:#0f3460; color:#eee; }
+  button:active { transform:scale(0.97); }
+  #faceNote { font-size:0.8rem; color:#888; margin-top:8px; text-align:center; }
+  input[type=file] { display:none; }
+</style>
+</head>
+<body>
+<h1>🌸 뷰티캠</h1>
+
+<div id="stage">
+  <canvas id="canvas" width="640" height="480"></canvas>
+  <div id="msg">🖼️ 사진을 불러와서 시작하세요</div>
+</div>
+
+<div id="controls">
+  <div class="group">✨ 전체</div>
+  <div class="slider-row"><label>밝기</label><input type="range" id="bright" min="80" max="140" value="105"><span></span></div>
+  <div class="slider-row"><label>채도</label><input type="range" id="sat" min="60" max="160" value="105"><span></span></div>
+
+  <div class="group">😊 얼굴</div>
+  <div class="slider-row"><label>피부결</label><input type="range" id="smooth" min="0" max="100" value="30"><span></span></div>
+  <div class="slider-row"><label>미백</label><input type="range" id="white" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>눈 크기</label><input type="range" id="eye" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>턱선</label><input type="range" id="jaw" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>코 슬림</label><input type="range" id="nose" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>미소</label><input type="range" id="smile" min="0" max="100" value="0"><span></span></div>
+
+  <div class="group">🧍 체형</div>
+  <div class="slider-row"><label>허리/골반</label><input type="range" id="waist" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>어깨/팔</label><input type="range" id="shoulder" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>다리 길이</label><input type="range" id="leg" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>다리 굵기</label><input type="range" id="legslim" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>전신 비율</label><input type="range" id="ratio" min="0" max="100" value="0"><span></span></div>
+
+  <div id="buttons">
+    <button id="loadBtn">🖼️ 불러오기</button>
+    <button id="autoBtn" hidden>✨ 자동 보정</button>
+    <button id="compareBtn" class="secondary" hidden>👁️ 원본 (꾹)</button>
+    <button id="presetBtn" class="secondary" hidden>💗 프리셋 저장</button>
+    <button id="saveBtn" class="secondary" hidden>💾 저장</button>
+  </div>
+  <div id="faceNote"></div>
+  <input type="file" id="fileInput" accept="image/*">
+</div>
+
+<script type="module">
+import { FaceLandmarker, PoseLandmarker, FilesetResolver } from
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const work = document.createElement('canvas');            // 워핑 작업용 (원본 크기)
+const wctx = work.getContext('2d', { willReadFrequently: true });
+const msg = document.getElementById('msg');
+const note = document.getElementById('faceNote');
+
+const SLIDER_IDS = ['bright','sat','smooth','white','eye','jaw','nose','smile',
+                    'waist','shoulder','leg','legslim','ratio'];
+const sliders = {};
+for (const id of SLIDER_IDS) {
+  const el = document.getElementById(id);
+  sliders[id] = el;
+  const span = el.parentElement.querySelector('span');
+  el.addEventListener('input', () => {
+    span.textContent = el.value;
+    if (stillSrc) requestRender();
+  });
+  span.textContent = el.value;
+}
+
+let stillSrc = null;        // 원본 이미지 (보정 전)
+let faces = [];             // 얼굴 랜드마크 (다중 얼굴)
+let pose = null;            // 몸 랜드마크
+let maskFull = null;        // 사람 영역 마스크 (배경 보호용)
+let skinMask = null;        // 피부 영역 마스크 (눈·입 제외)
+let faceModel = null, poseModel = null;
+
+// ---- MediaPipe 모델 로딩 (백그라운드) ----
+(async () => {
+  try {
+    const fileset = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    faceModel = await FaceLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" },
+      runningMode: "IMAGE", numFaces: 5
+    });
+    poseModel = await PoseLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task" },
+      runningMode: "IMAGE", numPoses: 1, outputSegmentationMasks: true
+    });
+  } catch (e) { console.warn('인식 모델 로딩 실패:', e); }
+})();
+
+function baseFilter() {
+  return `brightness(${sliders.bright.value}%) saturate(${sliders.sat.value}%)`;
+}
+
+// ---- 피부 마스크: 얼굴 윤곽 채우고 눈·입 구멍 뚫기 ----
+const FACE_OVAL = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,
+                   378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,
+                   162,21,54,103,67,109];
+function buildSkinMask() {
+  if (!faces.length) return null;
+  const w = stillSrc.width, h = stillSrc.height;
+  const m = document.createElement('canvas'); m.width = w; m.height = h;
+  const g = m.getContext('2d');
+  g.filter = `blur(${Math.max(4, w / 150)}px)`;       // 가장자리 페더링
+  g.fillStyle = '#fff';
+  for (const f of faces) {
+    g.beginPath();
+    FACE_OVAL.forEach((idx, i) => {
+      const x = f[idx].x * w, y = f[idx].y * h;
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.closePath(); g.fill();
+  }
+  g.globalCompositeOperation = 'destination-out';     // 눈·입은 스무딩 제외
+  for (const f of faces) {
+    for (const [a, b, scale] of [[33,133,0.9], [362,263,0.9], [61,291,0.65]]) {
+      const ax = f[a].x * w, ay = f[a].y * h, bx = f[b].x * w, by = f[b].y * h;
+      const r = Math.hypot(bx - ax, by - ay) * scale;
+      g.beginPath(); g.arc((ax+bx)/2, (ay+by)/2, r, 0, 7); g.fill();
+    }
+  }
+  return m;
+}
+
+// 필터 입힌 원본을 피부 마스크로 잘라 work 위에 겹침
+function maskedDraw(filter, alpha) {
+  const t = document.createElement('canvas');
+  t.width = work.width; t.height = work.height;
+  const tc = t.getContext('2d');
+  tc.filter = filter;
+  tc.drawImage(stillSrc, 0, 0);
+  tc.filter = 'none';
+  tc.globalCompositeOperation = 'destination-in';
+  tc.drawImage(skinMask, 0, 0);
+  wctx.save(); wctx.globalAlpha = alpha; wctx.drawImage(t, 0, 0); wctx.restore();
+}
+
+function drawWithFilters() {
+  wctx.save();
+  wctx.filter = baseFilter();
+  wctx.drawImage(stillSrc, 0, 0);
+  wctx.restore();
+  const s = +sliders.smooth.value, wk = +sliders.white.value;
+  const blurPx = Math.max(3, work.width / 200);
+  if (skinMask) {
+    // 피부 영역만: 미백(밝기↑·채도 약간↓) → 피부결(블러 블렌드)
+    if (wk > 0) maskedDraw(`${baseFilter()} brightness(${100 + wk*0.25}%) saturate(${100 - wk*0.15}%)`, 1);
+    if (s > 0)  maskedDraw(`${baseFilter()} blur(${blurPx}px)`, s / 100 * 0.85);
+  } else if (s > 0) {
+    // 얼굴 인식 실패 시 폴백: 전체 소프트포커스
+    wctx.save();
+    wctx.globalAlpha = s / 100 * 0.75;
+    wctx.filter = baseFilter() + ` blur(${blurPx}px)`;
+    wctx.drawImage(stillSrc, 0, 0);
+    wctx.restore();
+  }
+}
+
+// ---- 워핑 엔진 (얼굴·체형 공용) ----
+function warpRegion(data, out, w, h, cx, cy, r, mapFn) {
+  const x0 = Math.max(0, cx - r | 0), x1 = Math.min(w - 1, cx + r | 0);
+  const y0 = Math.max(0, cy - r | 0), y1 = Math.min(h - 1, cy + r | 0);
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const dx = x - cx, dy = y - cy;
+      const d = Math.hypot(dx, dy);
+      if (d >= r) continue;
+      const t = d / r, f = (1 - t) * (1 - t);
+      const [sx, sy] = mapFn(dx, dy, f);
+      // 이중선형 보간 샘플링
+      const ix = Math.max(0, Math.min(w - 2, Math.floor(sx)));
+      const iy = Math.max(0, Math.min(h - 2, Math.floor(sy)));
+      const fx = sx - ix, fy = sy - iy;
+      const di = (y * w + x) * 4;
+      for (let c = 0; c < 4; c++) {
+        const p00 = data[(iy * w + ix) * 4 + c],     p10 = data[(iy * w + ix + 1) * 4 + c];
+        const p01 = data[((iy+1) * w + ix) * 4 + c], p11 = data[((iy+1) * w + ix + 1) * 4 + c];
+        out[di + c] = p00 * (1-fx) * (1-fy) + p10 * fx * (1-fy)
+                    + p01 * (1-fx) * fy    + p11 * fx * fy;
+      }
+    }
+  }
+}
+const bulge = (cx, cy, r, k) => (data, out, w, h) =>
+  warpRegion(data, out, w, h, cx, cy, r, (dx, dy, f) => [cx + dx * (1 - k * f), cy + dy * (1 - k * f)]);
+const shift = (cx, cy, r, vx, vy) => (data, out, w, h) =>
+  warpRegion(data, out, w, h, cx, cy, r, (dx, dy, f) => [cx + dx + vx * f, cy + dy + vy * f]);
+
+function collectWarps() {
+  const w = work.width, h = work.height;
+  const passes = [];
+
+  for (const f of faces) {
+    const P = i => [f[i].x * w, f[i].y * h];
+    const eyeK = +sliders.eye.value / 100 * 0.25;
+    const jawK = +sliders.jaw.value / 100;
+    const noseK = +sliders.nose.value / 100;
+    const smileK = +sliders.smile.value / 100;
+    const [nx] = P(1);                                 // 코끝 (얼굴 중심선)
+    if (eyeK > 0) {
+      for (const [a, b] of [[33, 133], [362, 263]]) {  // 좌/우 눈꼬리
+        const [ax, ay] = P(a), [bx, by] = P(b);
+        const r = Math.hypot(bx - ax, by - ay) * 1.5;
+        passes.push(bulge((ax+bx)/2, (ay+by)/2, r, eyeK));
+      }
+    }
+    if (jawK > 0) {
+      const [lx0] = P(234), [rx0] = P(454);
+      const faceW = Math.abs(rx0 - lx0);
+      for (const i of [172, 397]) {                     // 좌/우 턱 중간점
+        const [jx, jy] = P(i);
+        const vx = Math.sign(nx - jx) * jawK * faceW * 0.06;
+        passes.push(shift(jx, jy, faceW * 0.3, vx, 0));
+      }
+    }
+    if (noseK > 0) {
+      for (const i of [129, 358]) {                     // 좌/우 콧볼
+        const [px, py] = P(i);
+        const r = Math.abs(px - nx) * 2.2;
+        passes.push(shift(px, py, r, Math.sign(nx - px) * noseK * r * 0.25, 0));
+      }
+    }
+    if (smileK > 0) {                                   // 입꼬리 올리기
+      const [lx, ly] = P(61), [rx, ry] = P(291);
+      const mouthW = Math.hypot(rx - lx, ry - ly);
+      for (const [px, py] of [[lx, ly], [rx, ry]])
+        passes.push(shift(px, py, mouthW * 0.6, 0, -smileK * mouthW * 0.12));
+    }
+  }
+
+  if (pose) {
+    const P = i => [pose[i].x * w, pose[i].y * h];
+    const vis = i => (pose[i].visibility ?? 1) > 0.5;
+    const waistK = +sliders.waist.value / 100;
+    const shK = +sliders.shoulder.value / 100;
+    // 랜드마크: 어깨 11/12, 팔꿈치 13/14, 골반 23/24
+    if (vis(11) && vis(12)) {
+      const [sx1] = P(11), [sx2] = P(12);
+      const bodyW = Math.abs(sx1 - sx2);                // 어깨 너비 기준
+      const cX = (sx1 + sx2) / 2;                       // 몸 중심선
+      if (waistK > 0 && vis(23) && vis(24)) {
+        for (const [s, hp] of [[11, 23], [12, 24]]) {   // 허리 ≈ 어깨→골반 65% 지점
+          const [ax, ay] = P(s), [bx, by] = P(hp);
+          const wx2 = ax + (bx - ax) * 0.65, wy2 = ay + (by - ay) * 0.65;
+          passes.push(shift(wx2, wy2, bodyW * 0.5, Math.sign(cX - wx2) * waistK * bodyW * 0.09, 0));
+        }
+        for (const i of [23, 24]) {                     // 골반 폭 (허리의 절반 강도)
+          const [px, py] = P(i);
+          passes.push(shift(px, py, bodyW * 0.4, Math.sign(cX - px) * waistK * bodyW * 0.05, 0));
+        }
+      }
+      const lsK = +sliders.legslim.value / 100;
+      if (lsK > 0) {                                    // 허벅지·종아리 폭 축소 (핀치 워핑)
+        for (const [hp, kn, an] of [[23, 25, 27], [24, 26, 28]]) {
+          if (!vis(hp) || !vis(kn)) continue;
+          const [hx, hy] = P(hp), [kx, ky] = P(kn);
+          passes.push(bulge((hx+kx)/2, (hy+ky)/2, Math.hypot(kx-hx, ky-hy) * 0.6, -lsK * 0.12));
+          if (!vis(an)) continue;
+          const [ax, ay] = P(an);
+          passes.push(bulge((kx+ax)/2, (ky+ay)/2, Math.hypot(ax-kx, ay-ky) * 0.55, -lsK * 0.10));
+        }
+      }
+      if (shK > 0) {
+        for (const i of [11, 12]) {                     // 어깨
+          const [px, py] = P(i);
+          passes.push(shift(px, py, bodyW * 0.35, Math.sign(cX - px) * shK * bodyW * 0.05, 0));
+        }
+        for (const [s, e] of [[11, 13], [12, 14]]) {    // 팔뚝 (어깨→팔꿈치 중간)
+          if (!vis(e)) continue;
+          const [ax, ay] = P(s), [bx, by] = P(e);
+          const mx = (ax+bx)/2, my = (ay+by)/2;
+          passes.push(shift(mx, my, bodyW * 0.3, Math.sign(cX - mx) * shK * bodyW * 0.05, 0));
+        }
+      }
+    }
+  }
+  return passes;
+}
+
+function applyWarpsTo(tctx, passes) {
+  const w = tctx.canvas.width, h = tctx.canvas.height;
+  const img = tctx.getImageData(0, 0, w, h);
+  let data = img.data;
+  for (const pass of passes) {
+    const out = new Uint8ClampedArray(data);
+    pass(data, out, w, h);
+    data = out;
+  }
+  img.data.set(data);
+  tctx.putImageData(img, 0, 0);
+}
+
+// ---- 배경 보호: 사람만 오려내 워핑하고, 빈자리는 주변 배경색으로 메움 ----
+function buildLayers() {
+  const w = work.width, h = work.height;
+  const person = document.createElement('canvas');
+  person.width = w; person.height = h;
+  const pc = person.getContext('2d', { willReadFrequently: true });
+  pc.drawImage(work, 0, 0);
+  pc.globalCompositeOperation = 'destination-in';
+  pc.drawImage(maskFull, 0, 0, w, h);
+
+  // 배경 레이어: 저해상도에서 사람 자리를 주변 색으로 채움 (얇은 틈에만 보여서 흐릿해도 OK)
+  const sw = 220, sh = Math.max(1, Math.round(h / w * 220));
+  const sc = document.createElement('canvas'); sc.width = sw; sc.height = sh;
+  const sctx = sc.getContext('2d', { willReadFrequently: true });
+  sctx.drawImage(work, 0, 0, sw, sh);
+  const mctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  mctx.canvas.width = sw; mctx.canvas.height = sh;
+  mctx.drawImage(maskFull, 0, 0, sw, sh);
+  const img = sctx.getImageData(0, 0, sw, sh);
+  const mimg = mctx.getImageData(0, 0, sw, sh);
+  const hole = new Uint8Array(sw * sh);
+  for (let i = 0; i < sw * sh; i++) hole[i] = mimg.data[i * 4 + 3] > 100 ? 1 : 0;
+  inpaint(img.data, hole, sw, sh, 40);
+  sctx.putImageData(img, 0, 0);
+
+  const bg = document.createElement('canvas');
+  bg.width = w; bg.height = h;
+  const bc = bg.getContext('2d');
+  bc.drawImage(sc, 0, 0, w, h);                       // 메워진 배경 (흐릿)
+  const sharp = document.createElement('canvas');     // 원래 배경 픽셀은 선명하게 유지
+  sharp.width = w; sharp.height = h;
+  const shc = sharp.getContext('2d');
+  shc.drawImage(work, 0, 0);
+  shc.globalCompositeOperation = 'destination-out';
+  shc.drawImage(maskFull, 0, 0, w, h);
+  bc.drawImage(sharp, 0, 0);
+  return { bg, person, pc };
+}
+
+// 구멍(사람 자리) 가장자리부터 이웃 배경색 평균으로 한 겹씩 메워 들어감
+function inpaint(data, hole, w, h, iters) {
+  for (let it = 0; it < iters; it++) {
+    const fills = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (!hole[i]) continue;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (const j of [i - 1, i + 1, i - w, i + w]) {
+        if (j < 0 || j >= w * h || hole[j]) continue;
+        r += data[j*4]; g += data[j*4+1]; b += data[j*4+2]; n++;
+      }
+      if (n) fills.push([i, r/n, g/n, b/n]);
+    }
+    if (!fills.length) break;
+    for (const [i, r, g, b] of fills) {
+      data[i*4] = r; data[i*4+1] = g; data[i*4+2] = b; data[i*4+3] = 255; hole[i] = 0;
+    }
+  }
+}
+
+// ---- 렌더링 ----
+let renderPending = false;
+function requestRender() {
+  if (renderPending) return;
+  renderPending = true;
+  requestAnimationFrame(() => { renderPending = false; render(); });
+}
+function render() {
+  const w = stillSrc.width, h = stillSrc.height;
+  work.width = w; work.height = h;
+  drawWithFilters();
+  const passes = collectWarps();
+  if (passes.length && maskFull) {
+    const { bg, person, pc } = buildLayers();
+    applyWarpsTo(pc, passes);                 // 사람 레이어만 워핑 → 배경 직선 유지
+    wctx.clearRect(0, 0, w, h);
+    wctx.drawImage(bg, 0, 0);
+    wctx.drawImage(person, 0, 0);
+  } else if (passes.length) {
+    applyWarpsTo(wctx, passes);               // 마스크 없으면 기존 방식
+  }
+
+  // 세로 확장: 구간(밴드)별 배율로 나눠 그리기
+  //  - 다리 길이: 무릎~발목 구간만 확장, 발 아래는 고정점 (신발·바닥 접점 유지)
+  //  - 전신 비율: 머리는 고정, 목 아래 전체 확장 (8등신 효과)
+  const legK = +sliders.leg.value / 100;
+  const ratioK = +sliders.ratio.value / 100;
+  let bands = null;
+  if ((legK > 0 || ratioK > 0) && pose) {
+    const vis = i => (pose[i].visibility ?? 1) > 0.5;
+    const Y = i => pose[i].y * h;
+    const neckY = vis(11) && vis(12) ? Math.round((Y(11) + Y(12)) / 2) : 0;
+    let kneeY = vis(25) && vis(26) ? Math.round((Y(25) + Y(26)) / 2)
+              : vis(23) && vis(24) ? Math.round((Y(23) + Y(24)) / 2) : 0;
+    let ankleY = vis(27) && vis(28) ? Math.round((Y(27) + Y(28)) / 2) : h;
+    kneeY = Math.max(kneeY, neckY);
+    ankleY = Math.min(h, Math.max(ankleY, kneeY));
+    const bodyS = ratioK > 0 && neckY > 0 ? 1 + ratioK * 0.10 : 1;
+    const legS = legK > 0 && kneeY > 0 ? 1 + legK * 0.22 : 1;
+    if (bodyS > 1 || legS > 1) {
+      bands = [[0, neckY, 1], [neckY, kneeY, bodyS],
+               [kneeY, ankleY, bodyS * legS], [ankleY, h, 1]];
+    }
+  }
+  canvas.width = w;
+  if (bands) {
+    canvas.height = Math.round(bands.reduce((t, [y0, y1, s]) => t + Math.max(0, y1 - y0) * s, 0));
+    let dy = 0;
+    for (const [y0, y1, s] of bands) {
+      const bh = y1 - y0;
+      if (bh <= 0) continue;
+      ctx.drawImage(work, 0, y0, w, bh, 0, dy, w, bh * s);
+      dy += bh * s;
+    }
+  } else {
+    canvas.height = h;
+    ctx.drawImage(work, 0, 0);
+  }
+}
+
+// ---- 사진 불러오기 ----
+document.getElementById('loadBtn').onclick = () => document.getElementById('fileInput').click();
+document.getElementById('fileInput').onchange = async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const bmp = await createImageBitmap(file);
+  const MAX = 1600;                                   // 워핑 속도 위해 크기 제한
+  const scale = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = bmp.width * scale | 0; c.height = bmp.height * scale | 0;
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+
+  stillSrc = c;
+  msg.hidden = true;
+  faces = []; pose = maskFull = skinMask = null;
+  if (faceModel) faces = faceModel.detect(c).faceLandmarks || [];
+  if (poseModel) {
+    const res = poseModel.detect(c);
+    pose = res.landmarks[0] || null;
+    const m = res.segmentationMasks?.[0];
+    if (m) {
+      // 사람 영역 마스크를 캔버스로 변환 (알파 채널에 저장, 가장자리는 블러로 부드럽게)
+      const raw = m.getAsFloat32Array();
+      const mc = document.createElement('canvas');
+      mc.width = m.width; mc.height = m.height;
+      const mi = mc.getContext('2d').createImageData(m.width, m.height);
+      for (let i = 0; i < raw.length; i++) {
+        mi.data[i*4] = mi.data[i*4+1] = mi.data[i*4+2] = 255;
+        mi.data[i*4+3] = raw[i] * 255;
+      }
+      mc.getContext('2d').putImageData(mi, 0, 0);
+      maskFull = document.createElement('canvas');
+      maskFull.width = c.width; maskFull.height = c.height;
+      const fx = maskFull.getContext('2d');
+      fx.filter = `blur(${Math.max(2, c.width / 400)}px)`;
+      fx.drawImage(mc, 0, 0, c.width, c.height);
+      m.close();
+    }
+  }
+  skinMask = buildSkinMask();
+
+  const parts = [];
+  parts.push(faces.length ? `얼굴 ${faces.length}명 ✓` : '얼굴 인식 ✗');
+  parts.push(pose ? '몸 ✓' : '몸 ✗');
+  parts.push(maskFull ? '배경 보호 ON' : '배경 보호 OFF');
+  note.textContent = parts.join(' · ') + ' — 인식된 부위의 슬라이더만 작동해요';
+  render();
+  for (const id of ['autoBtn','compareBtn','presetBtn','saveBtn'])
+    document.getElementById(id).hidden = false;
+  e.target.value = '';
+};
+
+// ---- 자동 보정 (1-tap) & 프리셋 ----
+const AUTO_DEFAULTS = { bright:108, sat:108, smooth:45, white:25, eye:20, jaw:15,
+                        nose:10, smile:10, waist:10, shoulder:8, leg:8, legslim:8, ratio:5 };
+document.getElementById('autoBtn').onclick = () => {
+  if (!stillSrc) return;
+  const preset = JSON.parse(localStorage.getItem('bc_preset') || 'null') || AUTO_DEFAULTS;
+  for (const id of SLIDER_IDS) {
+    if (preset[id] == null) continue;
+    sliders[id].value = preset[id];
+    sliders[id].dispatchEvent(new Event('input'));
+  }
+  note.textContent = localStorage.getItem('bc_preset')
+    ? '내 프리셋 적용 ✨' : '자동 보정 적용 ✨ (프리셋 저장하면 내 값으로 바뀌어요)';
+};
+document.getElementById('presetBtn').onclick = () => {
+  const v = {};
+  for (const id of SLIDER_IDS) v[id] = +sliders[id].value;
+  localStorage.setItem('bc_preset', JSON.stringify(v));
+  note.textContent = '프리셋 저장 완료 💗 다음부터 [자동 보정]이 이 값을 적용해요';
+};
+
+// ---- 원본 비교 (꾹 누르는 동안 원본 표시) ----
+const cmpBtn = document.getElementById('compareBtn');
+function showOriginal() {
+  if (!stillSrc) return;
+  canvas.width = stillSrc.width; canvas.height = stillSrc.height;
+  ctx.drawImage(stillSrc, 0, 0);
+}
+cmpBtn.addEventListener('pointerdown', showOriginal);
+cmpBtn.addEventListener('pointerup', () => stillSrc && render());
+cmpBtn.addEventListener('pointerleave', () => stillSrc && render());
+
+// ---- 저장 ----
+document.getElementById('saveBtn').onclick = () => {
+  const a = document.createElement('a');
+  a.download = `beautycam_${Date.now()}.jpg`;
+  a.href = canvas.toDataURL('image/jpeg', 0.92);
+  a.click();
+};
+</script>
+</body>
+</html>
