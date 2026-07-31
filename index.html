@@ -53,10 +53,13 @@
   <div class="slider-row"><label>미소</label><input type="range" id="smile" min="0" max="100" value="0"><span></span></div>
 
   <div class="group">🧍 체형</div>
-  <div class="slider-row"><label>허리/골반</label><input type="range" id="waist" min="0" max="100" value="0"><span></span></div>
-  <div class="slider-row"><label>어깨/팔</label><input type="range" id="shoulder" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>허리</label><input type="range" id="waist" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>골반</label><input type="range" id="hip" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>어깨</label><input type="range" id="shoulder" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>팔</label><input type="range" id="arm" min="0" max="100" value="0"><span></span></div>
   <div class="slider-row"><label>다리 길이</label><input type="range" id="leg" min="0" max="100" value="0"><span></span></div>
-  <div class="slider-row"><label>다리 굵기</label><input type="range" id="legslim" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>허벅지</label><input type="range" id="thigh" min="0" max="100" value="0"><span></span></div>
+  <div class="slider-row"><label>종아리</label><input type="range" id="calf" min="0" max="100" value="0"><span></span></div>
   <div class="slider-row"><label>전신 비율</label><input type="range" id="ratio" min="0" max="100" value="0"><span></span></div>
 
   <div id="buttons">
@@ -82,7 +85,7 @@ const msg = document.getElementById('msg');
 const note = document.getElementById('faceNote');
 
 const SLIDER_IDS = ['bright','sat','smooth','white','eye','jaw','nose','smile',
-                    'waist','shoulder','leg','legslim','ratio'];
+                    'waist','hip','shoulder','arm','leg','thigh','calf','ratio'];
 const sliders = {};
 for (const id of SLIDER_IDS) {
   const el = document.getElementById(id);
@@ -224,84 +227,95 @@ function collectWarps() {
 
   for (const f of faces) {
     const P = i => [f[i].x * w, f[i].y * h];
-    const eyeK = +sliders.eye.value / 100 * 0.25;
+    const eyeK = +sliders.eye.value / 100 * 0.45;
     const jawK = +sliders.jaw.value / 100;
     const noseK = +sliders.nose.value / 100;
     const smileK = +sliders.smile.value / 100;
     const [nx] = P(1);                                 // 코끝 (얼굴 중심선)
     if (eyeK > 0) {
-      for (const [a, b] of [[33, 133], [362, 263]]) {  // 좌/우 눈꼬리
-        const [ax, ay] = P(a), [bx, by] = P(b);
-        const r = Math.hypot(bx - ax, by - ay) * 1.5;
-        passes.push(bulge((ax+bx)/2, (ay+by)/2, r, eyeK));
+      // 눈 중심 = 좌우 꼬리 + 위/아래 눈꺼풀 4점 평균 (정확한 눈동자 위치)
+      for (const ring of [[33, 133, 159, 145], [362, 263, 386, 374]]) {
+        const pts = ring.map(P);
+        const cx2 = pts.reduce((t, p) => t + p[0], 0) / 4;
+        const cy2 = pts.reduce((t, p) => t + p[1], 0) / 4;
+        const eyeW = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]);
+        passes.push(bulge(cx2, cy2, eyeW * 1.6, eyeK));
       }
     }
     if (jawK > 0) {
       const [lx0] = P(234), [rx0] = P(454);
       const faceW = Math.abs(rx0 - lx0);
-      for (const i of [172, 397]) {                     // 좌/우 턱 중간점
+      // 턱선을 따라 좌/우 3점씩 안쪽으로 (V라인)
+      for (const i of [136, 172, 58, 365, 397, 288]) {
         const [jx, jy] = P(i);
-        const vx = Math.sign(nx - jx) * jawK * faceW * 0.06;
-        passes.push(shift(jx, jy, faceW * 0.3, vx, 0));
+        const vx = Math.sign(nx - jx) * jawK * faceW * 0.08;
+        passes.push(shift(jx, jy, faceW * 0.25, vx, 0));
       }
     }
     if (noseK > 0) {
-      for (const i of [129, 358]) {                     // 좌/우 콧볼
+      for (const i of [49, 279]) {                      // 좌/우 콧볼 바깥점
         const [px, py] = P(i);
-        const r = Math.abs(px - nx) * 2.2;
-        passes.push(shift(px, py, r, Math.sign(nx - px) * noseK * r * 0.25, 0));
+        const r = Math.max(8, Math.abs(px - nx) * 2.2);
+        passes.push(shift(px, py, r, Math.sign(nx - px) * noseK * r * 0.35, 0));
       }
     }
     if (smileK > 0) {                                   // 입꼬리 올리기
       const [lx, ly] = P(61), [rx, ry] = P(291);
       const mouthW = Math.hypot(rx - lx, ry - ly);
       for (const [px, py] of [[lx, ly], [rx, ry]])
-        passes.push(shift(px, py, mouthW * 0.6, 0, -smileK * mouthW * 0.12));
+        passes.push(shift(px, py, mouthW * 0.6, 0, -smileK * mouthW * 0.2));
     }
   }
 
   if (pose) {
     const P = i => [pose[i].x * w, pose[i].y * h];
     const vis = i => (pose[i].visibility ?? 1) > 0.5;
-    const waistK = +sliders.waist.value / 100;
-    const shK = +sliders.shoulder.value / 100;
-    // 랜드마크: 어깨 11/12, 팔꿈치 13/14, 골반 23/24
+    const K = id => +sliders[id].value / 100;
+    // 랜드마크: 어깨 11/12, 팔꿈치 13/14, 골반 23/24, 무릎 25/26, 발목 27/28
     if (vis(11) && vis(12)) {
       const [sx1] = P(11), [sx2] = P(12);
       const bodyW = Math.abs(sx1 - sx2);                // 어깨 너비 기준
       const cX = (sx1 + sx2) / 2;                       // 몸 중심선
-      if (waistK > 0 && vis(23) && vis(24)) {
-        for (const [s, hp] of [[11, 23], [12, 24]]) {   // 허리 ≈ 어깨→골반 65% 지점
+      if (K('waist') > 0 && vis(23) && vis(24)) {       // 허리: 어깨→골반 50%·75% 두 지점
+        for (const [s, hp] of [[11, 23], [12, 24]]) {
           const [ax, ay] = P(s), [bx, by] = P(hp);
-          const wx2 = ax + (bx - ax) * 0.65, wy2 = ay + (by - ay) * 0.65;
-          passes.push(shift(wx2, wy2, bodyW * 0.5, Math.sign(cX - wx2) * waistK * bodyW * 0.09, 0));
-        }
-        for (const i of [23, 24]) {                     // 골반 폭 (허리의 절반 강도)
-          const [px, py] = P(i);
-          passes.push(shift(px, py, bodyW * 0.4, Math.sign(cX - px) * waistK * bodyW * 0.05, 0));
+          for (const t of [0.5, 0.75]) {
+            const wx2 = ax + (bx - ax) * t, wy2 = ay + (by - ay) * t;
+            passes.push(shift(wx2, wy2, bodyW * 0.45, Math.sign(cX - wx2) * K('waist') * bodyW * 0.10, 0));
+          }
         }
       }
-      const lsK = +sliders.legslim.value / 100;
-      if (lsK > 0) {                                    // 허벅지·종아리 폭 축소 (핀치 워핑)
-        for (const [hp, kn, an] of [[23, 25, 27], [24, 26, 28]]) {
-          if (!vis(hp) || !vis(kn)) continue;
-          const [hx, hy] = P(hp), [kx, ky] = P(kn);
-          passes.push(bulge((hx+kx)/2, (hy+ky)/2, Math.hypot(kx-hx, ky-hy) * 0.6, -lsK * 0.12));
-          if (!vis(an)) continue;
-          const [ax, ay] = P(an);
-          passes.push(bulge((kx+ax)/2, (ky+ay)/2, Math.hypot(ax-kx, ay-ky) * 0.55, -lsK * 0.10));
+      if (K('hip') > 0 && vis(23) && vis(24)) {         // 골반 폭
+        for (const i of [23, 24]) {
+          const [px, py] = P(i);
+          passes.push(shift(px, py, bodyW * 0.4, Math.sign(cX - px) * K('hip') * bodyW * 0.10, 0));
         }
       }
-      if (shK > 0) {
-        for (const i of [11, 12]) {                     // 어깨
+      if (K('shoulder') > 0) {                          // 어깨 너비
+        for (const i of [11, 12]) {
           const [px, py] = P(i);
-          passes.push(shift(px, py, bodyW * 0.35, Math.sign(cX - px) * shK * bodyW * 0.05, 0));
+          passes.push(shift(px, py, bodyW * 0.35, Math.sign(cX - px) * K('shoulder') * bodyW * 0.09, 0));
         }
-        for (const [s, e] of [[11, 13], [12, 14]]) {    // 팔뚝 (어깨→팔꿈치 중간)
+      }
+      if (K('arm') > 0) {                               // 팔뚝 (어깨→팔꿈치 중간, 핀치로 가늘게)
+        for (const [s, e] of [[11, 13], [12, 14]]) {
           if (!vis(e)) continue;
           const [ax, ay] = P(s), [bx, by] = P(e);
-          const mx = (ax+bx)/2, my = (ay+by)/2;
-          passes.push(shift(mx, my, bodyW * 0.3, Math.sign(cX - mx) * shK * bodyW * 0.05, 0));
+          passes.push(bulge((ax+bx)/2, (ay+by)/2, Math.hypot(bx-ax, by-ay) * 0.6, -K('arm') * 0.2));
+        }
+      }
+      if (K('thigh') > 0) {                             // 허벅지 (골반→무릎, 핀치)
+        for (const [hp, kn] of [[23, 25], [24, 26]]) {
+          if (!vis(hp) || !vis(kn)) continue;
+          const [hx, hy] = P(hp), [kx, ky] = P(kn);
+          passes.push(bulge((hx+kx)/2, (hy+ky)/2, Math.hypot(kx-hx, ky-hy) * 0.6, -K('thigh') * 0.2));
+        }
+      }
+      if (K('calf') > 0) {                              // 종아리 (무릎→발목, 핀치)
+        for (const [kn, an] of [[25, 27], [26, 28]]) {
+          if (!vis(kn) || !vis(an)) continue;
+          const [kx, ky] = P(kn), [ax, ay] = P(an);
+          passes.push(bulge((kx+ax)/2, (ky+ay)/2, Math.hypot(ax-kx, ay-ky) * 0.55, -K('calf') * 0.18));
         }
       }
     }
@@ -419,8 +433,8 @@ function render() {
     let ankleY = vis(27) && vis(28) ? Math.round((Y(27) + Y(28)) / 2) : h;
     kneeY = Math.max(kneeY, neckY);
     ankleY = Math.min(h, Math.max(ankleY, kneeY));
-    const bodyS = ratioK > 0 && neckY > 0 ? 1 + ratioK * 0.10 : 1;
-    const legS = legK > 0 && kneeY > 0 ? 1 + legK * 0.22 : 1;
+    const bodyS = ratioK > 0 && neckY > 0 ? 1 + ratioK * 0.15 : 1;
+    const legS = legK > 0 && kneeY > 0 ? 1 + legK * 0.32 : 1;
     if (bodyS > 1 || legS > 1) {
       bands = [[0, neckY, 1], [neckY, kneeY, bodyS],
                [kneeY, ankleY, bodyS * legS], [ankleY, h, 1]];
@@ -447,7 +461,7 @@ document.getElementById('loadBtn').onclick = () => document.getElementById('file
 document.getElementById('fileInput').onchange = async e => {
   const file = e.target.files[0];
   if (!file) return;
-  const bmp = await createImageBitmap(file);
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); // 폰 사진 EXIF 회전 반영
   const MAX = 1600;                                   // 워핑 속도 위해 크기 제한
   const scale = Math.min(1, MAX / Math.max(bmp.width, bmp.height));
   const c = document.createElement('canvas');
@@ -495,8 +509,8 @@ document.getElementById('fileInput').onchange = async e => {
 };
 
 // ---- 자동 보정 (1-tap) & 프리셋 ----
-const AUTO_DEFAULTS = { bright:108, sat:108, smooth:45, white:25, eye:20, jaw:15,
-                        nose:10, smile:10, waist:10, shoulder:8, leg:8, legslim:8, ratio:5 };
+const AUTO_DEFAULTS = { bright:108, sat:108, smooth:45, white:25, eye:20, jaw:15, nose:10, smile:10,
+                        waist:12, hip:8, shoulder:8, arm:8, leg:10, thigh:8, calf:8, ratio:5 };
 document.getElementById('autoBtn').onclick = () => {
   if (!stillSrc) return;
   const preset = JSON.parse(localStorage.getItem('bc_preset') || 'null') || AUTO_DEFAULTS;
