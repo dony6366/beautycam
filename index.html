@@ -72,6 +72,7 @@
   <div id="faceNote"></div>
   <input type="file" id="fileInput" accept="image/*">
 </div>
+<div style="color:#555; font-size:0.7rem; margin-top:6px">v8</div>
 
 <script type="module">
 import { FaceLandmarker, PoseLandmarker, FilesetResolver } from
@@ -473,16 +474,16 @@ function render() {
   const ratioK = +sliders.ratio.value / 100;
   let bands = null;
   if ((legK > 0 || ratioK > 0) && pose) {
-    const vis = i => (pose[i].visibility ?? 1) > 0.5;
+    const vis = i => (pose[i].visibility ?? 1) > 0.6;
     const Y = i => pose[i].y * h;
     const neckY = vis(11) && vis(12) ? Math.round((Y(11) + Y(12)) / 2) : 0;
-    let kneeY = vis(25) && vis(26) ? Math.round((Y(25) + Y(26)) / 2)
-              : vis(23) && vis(24) ? Math.round((Y(23) + Y(24)) / 2) : 0;
+    const kneesOK = vis(25) && vis(26);                   // 무릎이 사진에 없으면 다리 늘리기 비활성
+    let kneeY = kneesOK ? Math.round((Y(25) + Y(26)) / 2) : 0;
     let ankleY = vis(27) && vis(28) ? Math.round((Y(27) + Y(28)) / 2) : h;
     kneeY = Math.max(kneeY, neckY);
     ankleY = Math.min(h, Math.max(ankleY, kneeY));
-    const bodyS = ratioK > 0 && neckY > 0 ? 1 + ratioK * 0.15 : 1;
-    const legS = legK > 0 && kneeY > 0 ? 1 + legK * 0.32 : 1;
+    const bodyS = ratioK > 0 && neckY > 0 && vis(23) && vis(24) ? 1 + ratioK * 0.15 : 1;
+    const legS = legK > 0 && kneesOK ? 1 + legK * 0.32 : 1;
     if (bodyS > 1 || legS > 1) {
       bands = [[0, neckY, 1], [neckY, kneeY, bodyS],
                [kneeY, ankleY, bodyS * legS], [ankleY, h, 1]];
@@ -547,6 +548,8 @@ document.getElementById('fileInput').onchange = async e => {
   const parts = [];
   parts.push(faces.length ? `얼굴 ${faces.length}명 ✓` : '얼굴 인식 ✗');
   parts.push(pose ? '몸 ✓' : '몸 ✗');
+  if (pose && !([25, 26].every(i => (pose[i].visibility ?? 1) > 0.6)))
+    parts.push('다리 미검출 (다리 길이·굵기 비활성)');
   parts.push(maskFull ? '배경 보호 ON' : '배경 보호 OFF');
   note.textContent = parts.join(' · ') + ' — 인식된 부위의 슬라이더만 작동해요';
   render();
