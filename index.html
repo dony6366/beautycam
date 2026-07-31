@@ -482,18 +482,19 @@ function render() {
                [kneeY, ankleY, bodyS * legS], [ankleY, h, 1]];
     }
   }
-  canvas.width = w;
+  // 프레임 고정: 사진 크기는 원본 그대로 두고 구간 비율만 재분배
+  canvas.width = w; canvas.height = h;
   if (bands) {
-    canvas.height = Math.round(bands.reduce((t, [y0, y1, s]) => t + Math.max(0, y1 - y0) * s, 0));
+    const total = bands.reduce((t, [y0, y1, s]) => t + Math.max(0, y1 - y0) * s, 0);
+    const norm = h / total;
     let dy = 0;
     for (const [y0, y1, s] of bands) {
       const bh = y1 - y0;
       if (bh <= 0) continue;
-      ctx.drawImage(work, 0, y0, w, bh, 0, dy, w, bh * s);
-      dy += bh * s;
+      ctx.drawImage(work, 0, y0, w, bh, 0, dy, w, bh * s * norm);
+      dy += bh * s * norm;
     }
   } else {
-    canvas.height = h;
     ctx.drawImage(work, 0, 0);
   }
 }
